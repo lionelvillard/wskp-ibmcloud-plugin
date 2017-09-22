@@ -1,0 +1,7 @@
+packages:
+  wskp-cloudant-binding:
+    org: villard@us.ibm.com
+    space: wskp-ibmcloud-dev
+    service: ibm-cloudant
+    name: wskp-cloudant
+    key: wskp-cloudant-key

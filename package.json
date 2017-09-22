@@ -1,0 +1,29 @@
+{
+  "name": "wskp-ibmcloud-plugin",
+  "version": "0.1.0",
+  "description": "IBM Cloud plugin for OpenWhisk Project",
+  "main": "dist/ibm.js",
+  "types": "ibm.ts",
+  "scripts": {
+    "pretest": "tsc",
+    "test": "mocha dist/test",
+    "compile": "tsc -watch -p ./",
+    "tsc": "tsc"
+  },
+  "author": "Lionel Villard",
+  "license": "Apache-2.0",
+  "devDependencies": {
+    "@types/node": "^8.0.28",
+    "expand-home-dir": "0.0.3",
+    "log4js": "^2.3.3",
+    "mocha": "^3.5.3",
+    "mocha-typescript": "^1.1.8",
+    "openwhisk-deploy": "^0.6.1",
+    "typescript": "^2.5.2"
+  },
+  "wskp": {
+    "service": [
+      "ibm-cloudant"
+    ]
+  }
+}
