@@ -18,7 +18,7 @@
     "log4js": "^2.3.3",
     "mocha": "^3.5.3",
     "mocha-typescript": "^1.1.8",
-    "openwhisk-deploy": "^0.6.1",
+    "openwhisk-deploy": "^0.6.2",
     "typescript": "^2.5.2"
   },
   "wskp": {
