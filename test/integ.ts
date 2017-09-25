@@ -30,11 +30,10 @@ class integration {
     ctx;
 
     async before() {
-        this.ctx = { logger: getLogger(), ow: auth.initWsk() };
+        this.ctx = { logger: getLogger() };
         this.ctx.logger.level = process.env.LOGGER_LEVEL || 'off';
 
         await plugins.registerFromPath(this.ctx, path.join(__dirname, '../..'));
-        await undeploy.all(this.ctx.ow);
     }
 
     after() {
@@ -44,13 +43,22 @@ class integration {
     async cloudant_unmanaged() {
         const cred = { org: ORG, home: './.openwhisk' };
         try {
+            
+            // Create cloudant service outside of wskd (unmanaged)
             await bx.login(this.ctx, cred);
             await bx.run(this.ctx, cred, 'plugin install Cloud-Functions -r Bluemix -f');
             await bx.run(this.ctx, cred, `iam space-create ${SPACE}`);
             await bx.run(this.ctx, cred, `target -s ${SPACE}`);
             await bx.run(this.ctx, cred, `wsk property get`);
+            
             await bx.run(this.ctx, cred, `service create cloudantNoSQLDB Lite wskp-cloudant`);
             await bx.run(this.ctx, cred, `service key-create wskp-cloudant wskp-cloudant-key`);
+
+
+            this.ctx.ow = auth.initWsk();
+            await undeploy.all(this.ctx.ow);
+
+            // Setup done. Run test...
 
             await deploy({
                 ow: this.ctx.ow,

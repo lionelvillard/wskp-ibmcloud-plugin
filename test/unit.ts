@@ -29,10 +29,11 @@ class Unit {
         this.config.logger_level = process.env.LOGGER_LEVEL || 'off';
     }
 
-    @test
+    @test.skip
     async cloudant() {
         try {
             const result = await cloudant.serviceContributor(this.config, 'mycloudant', {
+                service: 'ibm-cloudant',
                 org: 'villard@us.ibm.com',
                 name: 'mycloudant',
                 key: 'cloudantkey',

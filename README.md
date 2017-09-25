@@ -17,7 +17,7 @@ Contribution point: [service](https://github.com/lionelvillard/openwhisk-deploy/
 ## properties
 
 - `name` (string, optional): the Cloudant service instance. Default is the package name.
-- `key` (string, optional): the Cloudant key name. Default is *name*-key.
+- `key` (string, optional): the Cloudant key name. Default is `Credentials-1`.
 - `plan` (string, optional): the Cloudant service plan, e.g. `Lite` or `Standard`. Default is `Lite`. Use `bx service offerings` for more plans.
 
 ## example
@@ -29,7 +29,7 @@ packages:
     org: villard@us.ibm.com
     space: wskp-ibmcloud-dev
     name: wskp-cloudant-binding
-    key: wskp-cloudant-key
+    key: Credentials-1
 ```
 
 
