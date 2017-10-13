@@ -14,7 +14,9 @@
  * limitations under the License.
  */
 
-import { bx } from 'openwhisk-deploy';
+import { types, bx, interpolation } from 'openwhisk-deploy';
+import { exec } from 'child-process-promise';
+import * as rp from 'request-promise';
 
 // --- Plugin export
 
@@ -23,32 +25,61 @@ export async function serviceContributor(config, pkgName: string, pkg) {
     switch (service) {
         case 'ibm-cloudant':
             return cloudantContributor(config, pkgName, pkg);
+        case 'ibm-redis':
+            return redisContributor(config, pkgName, pkg);
         default:
             throw `Unsupported IBM service ${service}`;
     }
 }
 
-async function cloudantContributor(config, pkgName: string, pkg) {
+async function cloudantContributor(config: types.Config, pkgName: string, pkg) {
+    const space = interpolation.evaluate(config, pkg.space);
+    if (!space)
+        throw 'Missing space';
 
     const cred = {
         endpoint: pkg.endpoint || 'api.ng.bluemix.net',
         org: pkg.org,
-        space: pkg.space
+        space
     }
 
-    const key = pkg.key;
-    const name = pkg.name;
+    const key = interpolation.evaluate(config, pkg.key);
+    const name = interpolation.evaluate(config, pkg.name);
 
     try {
         const stdout = await bx.login(config, cred);
         config.logger.debug(`bx logged in: ${stdout}`);
 
-        const keys = await bx.run(config, cred, `service key-show ${name} ${key}`);
+        let keys;
+        try {
+            keys = await bx.run(config, cred, `service key-show ${name} ${key}`);
+        } catch (e) {
+            // key does not exist => create
+            await bx.run(config, cred, `service key-create ${name} ${key}`);
+            keys = await bx.run(config, cred, `service key-show ${name} ${key}`);
+        }
 
         config.logger.debug(`bx got keys`);
         const trimIdx = keys.stdout.indexOf('{');
         if (trimIdx > 0) {
             const json = JSON.parse(keys.stdout.substr(trimIdx));
+            json.dbname = interpolation.evaluate(config, pkg.dbname);
+
+            config.logger.info(`creating database ${json.dbname} (if needed)`);
+            try {
+                const response = await rp({
+                    method: 'PUT',
+                    uri: `${json.url}/${json.dbname}`,
+                    auth: {
+                        user: json.username,
+                        pass: json.password
+                    }
+                });
+
+                config.logger.info(`database created (response: ${JSON.stringify(response)})`);
+            } catch (e) {
+                config.logger.info(`database not created: ${e.message})`);
+            }
 
             return [{
                 kind: 'package',
@@ -60,11 +91,15 @@ async function cloudantContributor(config, pkgName: string, pkg) {
             }];
 
         } else {
-            throw `No service key ${key} found for service instancee ${name} as ${cred.org} in space ${cred.space}`;
+            throw `No service key ${key} found for service instance ${name} as ${cred.org} in space ${cred.space}`;
         }
     } catch (e) {
         console.log(e);
         config.logger.error(e);
         throw e;
     }
+}
+
+async function redisContributor(config: types.Config, pkgName: string, pkg) {
+
 }

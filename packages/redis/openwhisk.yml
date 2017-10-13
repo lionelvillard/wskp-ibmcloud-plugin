@@ -1,0 +1,6 @@
+variables:
+  host: string
+  port: string
+
+packages:
+  redis:  

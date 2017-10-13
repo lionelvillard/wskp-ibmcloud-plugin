@@ -1,0 +1,5 @@
+packages:
+  wskp-redis-binding:
+    inputs:
+      host: ${vars.REDIS_HOST}
+      port: ${vars.REDIS_PORT}

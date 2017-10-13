@@ -16,7 +16,7 @@
 import * as ibm from '../ibm';
 import { suite, test, slow, timeout } from 'mocha-typescript';
 import * as assert from 'assert';
-import { auth, bx, undeploy, deploy, plugins } from 'openwhisk-deploy';
+import { env, bx, undeploy, deploy, plugins } from 'openwhisk-deploy';
 import { getLogger } from 'log4js';
 import * as path from 'path';
 
@@ -30,7 +30,7 @@ class integration {
     ctx;
 
     async before() {
-        this.ctx = { logger: getLogger() };
+        this.ctx = { logger: getLogger(), cache: '.' };
         this.ctx.logger.level = process.env.LOGGER_LEVEL || 'off';
 
         await plugins.registerFromPath(this.ctx, path.join(__dirname, '../..'));
@@ -55,12 +55,12 @@ class integration {
             await bx.run(this.ctx, cred, `service key-create wskp-cloudant wskp-cloudant-key`);
 
 
-            this.ctx.ow = auth.initWsk();
+            this.ctx.ow = env.initWsk();
             await undeploy.all(this.ctx.ow);
 
             // Setup done. Run test...
 
-            await deploy({
+            await deploy.apply({
                 ow: this.ctx.ow,
                 location: 'test/cloudant.yaml'
             });
