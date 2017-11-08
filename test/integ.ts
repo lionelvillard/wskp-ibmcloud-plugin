@@ -23,59 +23,53 @@ import * as path from 'path';
 const ORG = 'villard@us.ibm.com';
 const SPACE = 'wskp-ibmcloud-dev';
 
-
-@suite
+@suite('IBM cloud services - Integration')
 class integration {
 
-    ctx;
+    config;
 
     async before() {
-        this.ctx = { logger: getLogger(), cache: '.' };
-        this.ctx.logger.level = process.env.LOGGER_LEVEL || 'off';
+        this.config = { logger: getLogger(), cache: '.' };
+        this.config.logger.level = process.env.LOGGER_LEVEL || 'off';
 
-        await plugins.registerFromPath(this.ctx, path.join(__dirname, '../..'));
+        await plugins.registerFromPath(this.config, path.join(__dirname, '../..'));
     }
 
-    after() {
-    }
-
-    @test
-    async cloudant_unmanaged() {
+    @test.skip
+    async cloudant() {
         const cred = { org: ORG, home: './.openwhisk' };
         try {
-            
             // Create cloudant service outside of wskd (unmanaged)
-            await bx.login(this.ctx, cred);
-            await bx.run(this.ctx, cred, 'plugin install Cloud-Functions -r Bluemix -f');
-            await bx.run(this.ctx, cred, `iam space-create ${SPACE}`);
-            await bx.run(this.ctx, cred, `target -s ${SPACE}`);
-            await bx.run(this.ctx, cred, `wsk property get`);
-            
-            await bx.run(this.ctx, cred, `service create cloudantNoSQLDB Lite wskp-cloudant`);
-            await bx.run(this.ctx, cred, `service key-create wskp-cloudant wskp-cloudant-key`);
+            await bx.login(this.config, cred);
+            await bx.run(this.config, cred, 'plugin install Cloud-Functions -r Bluemix -f');
+            await bx.run(this.config, cred, `iam space-create ${SPACE}`);
+            await bx.run(this.config, cred, `target -s ${SPACE}`);
+            await bx.run(this.config, cred, `wsk property get`);
 
+            await bx.run(this.config, cred, `service create cloudantNoSQLDB Lite wskp-cloudant`);
+            await bx.run(this.config, cred, `service key-create wskp-cloudant wskp-cloudant-key`);
 
-            this.ctx.ow = env.initWsk();
-            await undeploy.all(this.ctx.ow);
+            this.config.ow = env.initWsk();
+            await undeploy.all(this.config.ow);
 
             // Setup done. Run test...
 
             await deploy.apply({
-                ow: this.ctx.ow,
+                ow: this.config.ow,
                 location: 'test/cloudant.yaml'
             });
 
-            const cloudant = await this.ctx.ow.packages.get({ name: 'wskp-cloudant-binding' });
+            const cloudant = await this.config.ow.packages.get({ name: 'wskp-cloudant-binding' });
             assert.ok(cloudant);
             assert.deepStrictEqual(cloudant.binding, { namespace: 'whisk.system', name: 'cloudant' });
 
-            const dbs = await this.ctx.ow.actions.invoke({ name: 'wskp-cloudant-binding/list-all-databases', blocking: true });
+            const dbs = await this.config.ow.actions.invoke({ name: 'wskp-cloudant-binding/list-all-databases', blocking: true });
             assert.deepStrictEqual(dbs.response.result.all_databases, []);
         } catch (e) {
             console.log(e);
             assert.ok(false);
         } finally {
-            await bx.run(this.ctx, cred, `iam space-delete ${SPACE} -f`);
+            await bx.run(this.config, cred, `iam space-delete ${SPACE} -f`);
         }
     }
 }

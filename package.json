@@ -22,8 +22,11 @@
     "typescript": "^2.5.2"
   },
   "wskp": {
+    "serviceBinding": [
+      "cloudant", "cloudantNoSQLDB"
+    ],
     "service": [
-      "ibm-cloudant"
+      "cloudant", "cloudantNoSQLDB"
     ]
   },
   "dependencies": {

@@ -13,93 +13,158 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
-import { types, bx, interpolation } from 'openwhisk-deploy';
+import { IService, IPackage, IConfig, bx, interpolation, ptask, Task, utils } from 'openwhisk-deploy';
 import { exec } from 'child-process-promise';
 import * as rp from 'request-promise';
 
 // --- Plugin export
 
-export async function serviceContributor(config, pkgName: string, pkg) {
+export function serviceBindingContributor(config: IConfig, pkgName: string, pkg: IPackage) {
     const service = pkg.service;
-    switch (service) {
-        case 'ibm-cloudant':
-            return cloudantContributor(config, pkgName, pkg);
-        case 'ibm-redis':
-            return redisContributor(config, pkgName, pkg);
+    if (typeof service === 'string') {
+        // service is an id to a service defined under $.services
+
+        const services = utils.getObject(config.manifest, 'services');
+        const servicedef = services ? services[service] : null;
+        if (!servicedef)
+            config.fatal('service %s does not exist', service);
+
+        pkg.service = servicedef;
+    }
+    const type = pkg.service.type; // cannot be null
+
+    switch (type) {
+        case 'cloudant':
+        case 'cloudantNoSQLDB':
+            return cloudantBinding(config, pkgName, pkg);
         default:
-            throw `Unsupported IBM service ${service}`;
+            config.fatal('Unsupported IBM service type: %s', service);
     }
 }
 
-async function cloudantContributor(config: types.Config, pkgName: string, pkg) {
-    const space = interpolation.evaluate(config, pkg.space);
+export function serviceContributor(config: IConfig, id: string, service: IService) {
+    switch (service.type) {
+        case 'cloudant':
+        case 'cloudantNoSQLDB':
+            return cloudantService(config, id, service as IServiceInstance);
+        default:
+            config.fatal('Unsupported IBM service type: %s', service);
+    }
+}
+
+// ---- IBM Cloud provider
+
+export interface IServiceInstance extends IService {
+    // The GUID of the space where you want to create the service. You can retrieve the value from data source ibm_space.
+    space_guid: string | Task<string>;
+
+    // The name of the service offering. You can retrieve the value by running the bx service offerings command in the Bluemix CLI.
+    service: string;
+
+    // The name of the plan type supported by service. You can retrieve the value by running the bx service offerings command in the Bluemix CLI.
+    plan: string;
+
+    // Tags associated with the service instance.
+    tags?: string[];
+
+    // Arbitrary parameters to pass to the service broker. The value must be a JSON object.
+    parameters?: { [key: string]: object };
+}
+
+function credential(config: IConfig, id: string, service: IServiceInstance): bx.ICredential {
+    const space = service.space;
     if (!space)
-        throw 'Missing space';
+        config.fatal('missing space in service id %s', id);
 
-    const cred = {
-        endpoint: pkg.endpoint || 'api.ng.bluemix.net',
-        org: pkg.org,
+    return {
+        endpoint: service.endpoint || 'api.ng.bluemix.net',
+        org: service.org, // TODO: compute from space
         space
-    }
+    };
+}
 
-    const key = interpolation.evaluate(config, pkg.key);
-    const name = interpolation.evaluate(config, pkg.name);
-
+async function getKey(config: IConfig, cred: bx.ICredential, serviceName: string, key: string) {
     try {
-        const stdout = await bx.login(config, cred);
-        config.logger.debug(`bx logged in: ${stdout}`);
-
-        let keys;
-        try {
-            keys = await bx.run(config, cred, `service key-show ${name} ${key}`);
-        } catch (e) {
-            // key does not exist => create
-            await bx.run(config, cred, `service key-create ${name} ${key}`);
-            keys = await bx.run(config, cred, `service key-show ${name} ${key}`);
-        }
-
-        config.logger.debug(`bx got keys`);
+        config.logger.info('retrieving service key');
+        const keys = await bx.run(config, cred, `service key-show ${serviceName} ${key}`);
+        config.logger.debug('bx got keys');
         const trimIdx = keys.stdout.indexOf('{');
-        if (trimIdx > 0) {
-            const json = JSON.parse(keys.stdout.substr(trimIdx));
-            json.dbname = interpolation.evaluate(config, pkg.dbname);
-
-            config.logger.info(`creating database ${json.dbname} (if needed)`);
-            try {
-                const response = await rp({
-                    method: 'PUT',
-                    uri: `${json.url}/${json.dbname}`,
-                    auth: {
-                        user: json.username,
-                        pass: json.password
-                    }
-                });
-
-                config.logger.info(`database created (response: ${JSON.stringify(response)})`);
-            } catch (e) {
-                config.logger.info(`database not created: ${e.message})`);
-            }
-
-            return [{
-                kind: 'package',
-                name: pkgName,
-                body: {
-                    bind: '/whisk.system/cloudant',
-                    inputs: json
-                }
-            }];
-
-        } else {
-            throw `No service key ${key} found for service instance ${name} as ${cred.org} in space ${cred.space}`;
-        }
+        return (trimIdx > 0) ? JSON.parse(keys.stdout.substr(trimIdx)) : null;
     } catch (e) {
-        console.log(e);
-        config.logger.error(e);
-        throw e;
+        // key does not exist => create
+        await bx.run(config, cred, `service key-create ${serviceName} ${key}`);
+        return getKey(config, cred, serviceName, key);
     }
 }
 
-async function redisContributor(config: types.Config, pkgName: string, pkg) {
+// ---- cloudant
 
+function cloudantService(config: IConfig, id: string, service: IServiceInstance) {
+    service.service = 'cloudantNoSQLDB';
+    const cred = credential(config, id, service);
+
+    if (!service.name)
+        service.name = id;
+
+    if (!service.plan)
+        service.plan = 'Lite';
+
+    service.space_guid = ptask(async () => {
+        const process = await bx.run(config, cred, `account space ${cred.space} --guid`);
+        return process.stdout.trim();
+    }, ['data']);
+
+    return [{
+        kind: 'service',
+        id,
+        body: service
+    }];
 }
+
+function cloudantBinding(config: IConfig, pkgName: string, pkg: IPackage) {
+    const service = pkg.service;
+
+    const cred = credential(config, '', service);
+
+    const suffix = config.envname ? `-${config.envname}` : '';
+    const name = config.manifest && config.manifest.name ? config.manifest.name : '';
+    const key = pkg.key || `${name}${suffix}`;
+    const dbname = pkg.dbname || `${name}${suffix}`;
+
+    const inputs = ptask(async () => {
+        const credkey = await getKey(config, cred, service.name, key);
+        credkey.dbname = dbname;
+        await createCloudantDB(config, credkey);
+
+        console.log(credkey);
+        return credkey;
+    });
+
+    return [{
+        kind: 'package',
+        name: pkgName,
+        body: {
+            bind: '/whisk.system/cloudant',
+            inputs
+        }
+    }];
+}
+
+async function createCloudantDB(config: IConfig, credkey) {
+    config.logger.info(`creating database ${credkey.dbname} (if needed)`);
+    try {
+        const response = await rp({
+            method: 'PUT',
+            uri: `${credkey.url}/${credkey.dbname}`,
+            auth: {
+                user: credkey.username,
+                pass: credkey.password
+            }
+        });
+
+        config.logger.info(`database created (response: ${JSON.stringify(response)})`);
+    } catch (e) {
+        config.logger.info(`database exist already: ${e.message})`);
+    }
+}
+

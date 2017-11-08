@@ -17,34 +17,53 @@
 import * as cloudant from '../ibm';
 import { suite, test, slow, timeout } from 'mocha-typescript';
 import * as assert from 'assert';
-import { getLogger } from 'log4js';
+import * as wskd from 'openwhisk-deploy';
 
-@suite
+@suite('IBM cloud services - Unit')
 class Unit {
 
     config;
 
     async before() {
-        this.config = { cache: '.openwhisk', logger: getLogger() };
-        this.config.logger_level = process.env.LOGGER_LEVEL || 'off';
+        this.config = wskd.init.newConfig(null, process.env.LOGGER_LEVEL || 'off');
+        await wskd.init.init(this.config);
     }
 
-    @test.skip
-    async cloudant() {
-        try {
-            const result = await cloudant.serviceContributor(this.config, 'mycloudant', {
-                service: 'ibm-cloudant',
-                org: 'villard@us.ibm.com',
-                name: 'mycloudant',
-                key: 'cloudantkey',
-                space: 'dev'
-            });
-            assert.ok(result)
-            assert.strictEqual(result[0].name, 'mycloudant');
-        } catch (e) {
-            console.log(e)
-        }
+    @test('Cloudant service')
+    async cloudantService() {
+        const result = cloudant.serviceContributor(this.config, 'mycloudant', {
+            type: 'cloudant',
+            org: process.env.BLUEMIX_ORG,
+            space: 'dev'
+        });
+        assert.ok(result);
+        await wskd.allTasks();
+        assert.ok((result[0].body.space_guid as wskd.Task<string>).resolved);
+    }
 
+    @test('Cloudant service binding - inlined')
+    async cloudantBinding() {
+        const result = cloudant.serviceBindingContributor(this.config, 'mycloudant', {
+            service: {
+                type: 'cloudant',
+                name: 'cloudant',
+                org: process.env.BLUEMIX_ORG,
+                space: 'dev'
+            },
+            dbname: 'cloudantdb',
+            key: 'cloudantkey'
+        });
+        assert.ok(result);
+        await wskd.allTasks();
+
+        assert.equal(result[0].body.bind, '/whisk.system/cloudant');
+
+        const task = result[0].body.inputs;
+        assert.ok(task.resolved.host);
+        assert.ok(task.resolved.password);
+        assert.ok(task.resolved.port);
+        assert.ok(task.resolved.url);
+        assert.ok(task.resolved.username);
     }
 
 }
