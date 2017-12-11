@@ -1,0 +1,16 @@
+# resources to provision
+resources:
+  ${vars.space}:
+    name: ${vars.space} # default is space id
+    org: ${vars.org}
+    space_quota: 'myspacequota'
+    managers: ['manager@example.com']
+    auditors: ['auditor@example.com']
+    developers: ['developer@example.com']
+
+  cloudant:
+    provider: ibm
+    type: cloudantNoSQLDB # alias: cloudant
+    bluemix_api_key: ${vars.ibm_bx_api_key}
+    space: ${vars.space} # import an existing space.
+    org: ${vars.org}

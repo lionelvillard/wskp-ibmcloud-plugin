@@ -31,7 +31,7 @@ class Unit {
 
     @test('Cloudant service')
     async cloudantService() {
-        const result = cloudant.serviceContributor(this.config, 'mycloudant', {
+        const result = cloudant.resourceContributor(this.config, 'mycloudant', {
             type: 'cloudant',
             org: process.env.BLUEMIX_ORG,
             space: 'dev'
@@ -43,7 +43,7 @@ class Unit {
 
     @test('Cloudant service binding - inlined')
     async cloudantBinding() {
-        const result = cloudant.serviceBindingContributor(this.config, 'mycloudant', {
+        const result = cloudant.resourceBindingContributor(this.config, 'mycloudant', {
             service: {
                 type: 'cloudant',
                 name: 'cloudant',

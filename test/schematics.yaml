@@ -1,0 +1,25 @@
+schematics:
+  description: The environments' description
+  frozen: The environments' frozen flag
+  name: ${vars.envname}
+  sourcerelease: The environments' source release
+  sourceurl: The environments' source URL
+  tags:
+  variablestore:
+
+  #
+  provider:
+    - ibm:
+        bluemix_api_key: ${vars.ibm_bx_api_key}
+
+  data:
+    ibm_space:
+      spaceData:
+        space: ${vars.space}
+        org: ${vars.org}
+
+  resource:
+    ibm_service_instance:
+      mycloudant:
+        space_guid: ${self.schematics.data.ibm_space.spaceData.id}
+        service: cloudantNoSQLDB
