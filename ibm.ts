@@ -13,10 +13,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { IResource, IPackage, IConfig, bx, interpolation, ptask, Task, utils } from 'openwhisk-deploy';
+import { IResource, IPackage, IConfig, bx, interpolation, ptask, Task, utils, ResourceStatus } from 'openwhisk-deploy';
 import { exec } from 'child-process-promise';
 import * as rp from 'request-promise';
-import { DH_CHECK_P_NOT_SAFE_PRIME } from 'constants';
 
 // --- Plugin export
 
@@ -67,15 +66,18 @@ interface ISpace extends IResource {
 }
 
 function space(config: IConfig, id: string, space: ISpace) {
+    space._status = ResourceStatus.PENDING;
+    space.name = space.name || id;
+    config.logger.info(`${space.managed ? 'create' : 'import'} space ${space.name}`);
+
     const cred = credential(config, space);
+    cred.nocreate = !space.managed;
 
     space.space_guid = ptask(async () => {
-        try {
-            const process = await bx.run(config, cred, `account space ${cred.space} --guid`);
-            return process.stdout.trim();
-        } catch (e) {
-            console.log(e)
-        }
+        const process = await bx.run(config, cred, `account space ${cred.space} --guid`);
+        space._status = ResourceStatus.PROVISIONED;
+
+        return process.stdout.trim();
     }, ['data']);
 
     return [{
@@ -88,10 +90,11 @@ function space(config: IConfig, id: string, space: ISpace) {
 // ---- IBM services
 
 interface IServiceInstance extends IResource {
-    /*
-     * The GUID of the space where you want to create the service. You can retrieve the value from
-     * data source ibm_space. space_guid: string | Task<string>;
-     */
+
+    /** The the space where you want to create the service. */
+    space: string;
+
+    /** The service name */
     service: string;
 
     /*
@@ -108,13 +111,32 @@ interface IServiceInstance extends IResource {
 }
 
 function serviceInstance(config: IConfig, id: string, instance: IServiceInstance) {
-    switch (instance.service) {
-        case 'cloudant':
-        case 'cloudantNoSQLDB':
-            return cloudantService(config, id, instance);
-        default:
-            config.fatal('Unsupported IBM service %s', instance.service);
-    }
+    normalizeServiceName(instance);
+    instance._status = ResourceStatus.PENDING;
+    instance.service = 'cloudantNoSQLDB'; // normalize
+
+    instance.name = instance.name || id;
+    config.logger.info(`${instance.managed} ? 'create': 'import'} service ${instance.name}`);
+
+    instance.plan = instance.plan || 'Lite';
+
+    instance.id = ptask(async () => {
+        await interpolation.blockUntil(config, `self.resources['${instance.space}']`, '_status', ResourceStatus.PROVISIONED);
+        const space = config.manifest.resources[instance.space];
+        if (!space)
+            config.fatal('space %s does not exists', instance.space);
+        const cred = credential(config, space);
+        const id = await showService(config, cred, instance);
+        instance._status = ResourceStatus.PROVISIONED;
+        return id;
+
+    });
+
+    return [{
+        kind: 'service',
+        id,
+        body: instance
+    }];
 }
 
 function serviceBinding(config: IConfig, pkgName: string, pkg: IPackage) {
@@ -127,29 +149,16 @@ function serviceBinding(config: IConfig, pkgName: string, pkg: IPackage) {
     }
 }
 
-// ---- cloudant
+const serviceAliases = {
+    cloudant: 'cloudantNoSQLDB'
+};
 
-function cloudantService(config: IConfig, id: string, instance: IServiceInstance) {
-    instance.service = 'cloudantNoSQLDB'; // normalize
-
-    instance.name = instance.name || id;
-    instance.plan = instance.plan || 'Lite';
-
-    instance.output = ptask(async () => {
-        const space = await interpolation.fullyEvaluate(config, `self.resources.${instance.space}.space_guid`);
-        const cred = credential(config, space);
-        const id = await showService(config, cred, instance);
-        return {
-            id
-        }
-    });
-
-    return [{
-        kind: 'service',
-        id,
-        body: instance
-    }];
+function normalizeServiceName(instance: IServiceInstance) {
+    const alias = serviceAliases[instance.service];
+    instance.service = alias || instance.service;
 }
+
+// ---- cloudant
 
 function cloudantBinding(config: IConfig, pkgName: string, pkg: IPackage) {
     const instance: IServiceInstance = pkg.resource;
@@ -197,7 +206,6 @@ async function createCloudantDB(config: IConfig, credkey) {
     }
 }
 
-
 // -- helpers
 
 function credential(config: IConfig, space: ISpace): bx.ICredential {
@@ -228,21 +236,23 @@ async function getKey(config: IConfig, cred: bx.ICredential, serviceName: string
 async function showService(config: IConfig, cred: bx.ICredential, instance: IServiceInstance) {
     try {
         config.logger.info(`getting ${instance.name} guid`);
+        await bx.run(config, cred, `target -s ${cred.space}`);
         const guid = await bx.run(config, cred, `service show ${instance.name} --guid`);
         const lines = guid.stdout.split(/\s/g);
-        if (lines.length === 3) {
+        if (lines.length >= 3) {
             return lines[2];
         } else {
             config.fatal('malformed guid: %s', guid.stdout);
         }
     } catch (e) {
-        if (e.stderr.includes('not found')) {
+        if (instance.managed && e.stdout && e.stdout.includes('not found')) {
             try {
                 await bx.run(config, cred, `service create ${instance.service} ${instance.plan} ${instance.name}`);
                 return showService(config, cred, instance);
             } catch (e2) {
                 config.fatal('service %s could not be created: %s', instance.name, e2.stderr);
             }
-        }
+        } else
+            throw e;
     }
 }

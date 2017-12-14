@@ -14,10 +14,11 @@
  * limitations under the License.
  */
 
-import * as cloudant from '../ibm';
+import * as ibmcloud from '../ibm';
 import { suite, test, slow, timeout } from 'mocha-typescript';
 import * as assert from 'assert';
 import * as wskd from 'openwhisk-deploy';
+import { ResourceStatus } from 'openwhisk-deploy';
 
 @suite('IBM cloud services - Unit')
 class Unit {
@@ -29,41 +30,142 @@ class Unit {
         await wskd.init.init(this.config);
     }
 
-    @test('Cloudant service')
-    async cloudantService() {
-        const result = cloudant.resourceContributor(this.config, 'mycloudant', {
-            type: 'cloudant',
+    @test('Should provision an IBM cloud space named wskp-space-ibmcloud-test-ci')
+    async ibmspace() {
+        await wskd.bx.deleteSpace(this.config, { space: 'dev' }, 'wskp-space-ibmcloud-test-ci');
+
+        const result = ibmcloud.resourceContributor(this.config, 'wskp-space-ibmcloud-test-ci', {
+            type: 'ibm_space',
             org: process.env.BLUEMIX_ORG,
-            space: 'dev'
+            managed: true
         });
         assert.ok(result);
-        await wskd.allTasks();
+        await wskd.waitForAllTasks();
         assert.ok((result[0].body.space_guid as wskd.Task<string>).resolved);
+
+        await wskd.bx.deleteSpace(this.config, { space: 'dev' }, 'wskp-space-ibmcloud-test-ci');
     }
 
-    @test('Cloudant service binding - inlined')
-    async cloudantBinding() {
-        const result = cloudant.resourceBindingContributor(this.config, 'mycloudant', {
-            service: {
-                type: 'cloudant',
-                name: 'cloudant',
-                org: process.env.BLUEMIX_ORG,
-                space: 'dev'
-            },
-            dbname: 'cloudantdb',
-            key: 'cloudantkey'
+    @test('Should raise an error trying to import a non-existing IBM cloud space')
+    async ibmspaceNoExist() {
+        const result = ibmcloud.resourceContributor(this.config, 'wskp-dev-ci-that-does-not-exist', {
+            type: 'ibm_space',
+            org: process.env.BLUEMIX_ORG,
+        });
+        try {
+            assert.ok(result);
+            await wskd.waitForAllTasks();
+            assert.ok(false);
+        } catch (e) {
+            assert.ok((result[0].body.space_guid as wskd.Task<string>).reason);
+        }
+    }
+
+    @test('Should import import an existing IBM cloud space')
+    async ibmspaceImport() {
+        await wskd.bx.deleteSpace(this.config, { space: 'dev' }, 'wskp-space-ibmcloud-test-ci');
+
+        const result = ibmcloud.resourceContributor(this.config, 'wskp-space-ibmcloud-test-ci', {
+            type: 'ibm_space',
+            org: process.env.BLUEMIX_ORG,
         });
         assert.ok(result);
-        await wskd.allTasks();
+        await wskd.waitForAllTasks();
+        assert.ok((result[0].body.space_guid as wskd.Task<string>).resolved);
 
-        assert.equal(result[0].body.bind, '/whisk.system/cloudant');
-
-        const task = result[0].body.inputs;
-        assert.ok(task.resolved.host);
-        assert.ok(task.resolved.password);
-        assert.ok(task.resolved.port);
-        assert.ok(task.resolved.url);
-        assert.ok(task.resolved.username);
+        await wskd.bx.deleteSpace(this.config, { space: 'dev' }, 'wskp-space-ibmcloud-test-ci');
     }
+
+    @test('Should raise an error when service space does not exist')
+    async cloudantServiceNoSpace() {
+        this.config.manifest = {
+            resources: {}
+        };
+
+        const result = ibmcloud.resourceContributor(this.config, 'wskp-cloudant-ci', {
+            type: 'ibm_service_instance',
+            service: 'cloudant',
+            space: 'wskp-dev-ci-that-does-not-exist'
+        });
+        assert.ok(result);
+        try {
+            await wskd.waitForAllTasks();
+            assert.ok(false);
+        } catch (e) {
+            assert.ok(true);
+            assert.equal(e.message, 'space wskp-dev-ci-that-does-not-exist does not exists');
+        }
+    }
+
+    @test('Should raise an error when unmanaged service does not exist')
+    async cloudantServiceErrorNoExist() {
+        const config = wskd.init.newConfigFromJSON({
+            resources: {
+                'wskp-space-ibmcloud-test-ci': {
+                    type: 'ibm_space',
+                    org: process.env.BLUEMIX_ORG,
+                    managed: true
+                },
+                'wskp-cloudant-ci-that-does-not-exist': {
+                    type: 'ibm_service_instance',
+                    space: 'wskp-space-ibmcloud-test-ci',
+                    service: 'cloudant',
+                }
+            }
+        }, process.env.LOGGER_LEVEL);
+        config.skipPhases = ['validation'];
+        await wskd.init.init(config);
+
+        const result = ibmcloud.resourceContributor(config, 'wskp-space-ibmcloud-test-ci', config.manifest.resources['wskp-space-ibmcloud-test-ci']);
+        assert.ok(result);
+
+        const result2 = ibmcloud.resourceContributor(config, 'wskp-cloudant-ci-that-does-not-exist', config.manifest.resources['wskp-cloudant-ci-that-does-not-exist']);
+        assert.ok(result2);
+        try {
+            await wskd.waitForAllTasks();
+            assert.ok(false);
+        } catch (e) {
+            assert.ok(e.stdout.includes('not found'));
+        }
+    }
+
+    @test('Should provision the IBM cloudant service named wskp-cloudant-ibmcloud-ci')
+    async cloudantService() {
+        const config = wskd.init.newConfigFromJSON({
+            resources: {
+                'wskp-space-ibmcloud-test-ci': {
+                    type: 'ibm_space',
+                    org: process.env.BLUEMIX_ORG,
+                    managed: true
+                },
+                'wskp-cloudant-ci': {
+                    type: 'ibm_service_instance',
+                    space: 'wskp-space-ibmcloud-test-ci',
+                    service: 'cloudant',
+                    managed: true
+                }
+            }
+        }, process.env.LOGGER_LEVEL);
+        config.skipPhases = ['validation'];
+        await wskd.init.init(config);
+
+        // Make sure service does not exist
+        wskd.bx.deleteService(config, { space: 'wskp-space-ibmcloud-test-ci' }, 'wskp-cloudant-ci');
+
+        try {
+            const result = ibmcloud.resourceContributor(config, 'wskp-space-ibmcloud-test-ci', config.manifest.resources['wskp-space-ibmcloud-test-ci']);
+            assert.ok(result);
+
+            const result2 = ibmcloud.resourceContributor(config, 'wskp-cloudant-ci', config.manifest.resources['wskp-cloudant-ci']);
+            assert.ok(result2);
+            await wskd.waitForAllTasks();
+            assert.strictEqual(result2[0].body._status, ResourceStatus.PROVISIONED);
+            assert.ok(result2[0].body.id);
+        } finally {
+            // Cleanup
+            wskd.bx.deleteService(config, { space: 'wskp-space-ibmcloud-test-ci' }, 'wskp-cloudant-ci');
+        }
+    }
+
 
 }

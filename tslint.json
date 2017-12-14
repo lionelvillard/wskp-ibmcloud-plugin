@@ -1,0 +1,23 @@
+{
+    "extends": [
+        "tslint:recommended"
+    ],
+    "rules": {
+        "quotemark":false,
+        "ordered-imports": false,
+        "variable-name": false,
+        "curly": false,
+        "no-unused-variable":true,
+        "forin": false,
+        "max-line-length":false,
+        "object-literal-sort-keys": false,
+        "arrow-parens": false,
+        "trailing-comma": false,
+        "prefer-const": false,
+        "array-type": false,
+        "max-classes-per-file":false,
+        "member-access": false,
+        "no-shadowed-variable": false,
+        "no-conditional-assignment": false
+    }
+}
